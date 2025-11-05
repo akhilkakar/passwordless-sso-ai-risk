@@ -1,0 +1,15 @@
+sequenceDiagram
+  participant U as User (Akhil)
+  participant F as Frontend (Next.js)
+  participant C as Amazon Cognito
+  participant R as Risk Engine
+  U->>F: Click "Login"
+  F->>C: Redirect to Hosted UI (Auth Code + PKCE, Passkey)
+  C->>F: Redirect with code
+  F->>R: POST /risk/evaluate (context)
+  R-->>F: allow/require_mfa
+  alt High Risk
+    F->>C: Redirect to MFA
+  else Low/Medium
+    F->>U: Show Profile
+  end

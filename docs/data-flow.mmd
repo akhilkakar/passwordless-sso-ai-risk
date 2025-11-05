@@ -1,0 +1,6 @@
+flowchart TD
+  Context[Login Context] --> Rules[Rule Weights]
+  Rules --> Score[Risk Score]
+  Score --> Policy[Policy Thresholds]
+  Policy --> Decision[Decision (allow or MFA)]
+  Decision --> DDB[(DynamoDB risk_events)]

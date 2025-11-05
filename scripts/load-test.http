@@ -1,0 +1,11 @@
+### Quick test for /risk/evaluate
+POST http://localhost:8081/risk/evaluate
+Content-Type: application/json
+
+{
+  "ip": "198.51.100.1",
+  "device_id": "new",
+  "user_agent": "Chrome",
+  "geo": {"country": "US"},
+  "login_ts": 1690000000
+}

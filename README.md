@@ -1,119 +1,99 @@
-# Passwordless SSO + AI Risk Scoring (AWS)
+# Passwordless SSO + AI Risk (AWS)
 
-**Goal**: Demonstrate passwordless login with passkeys (WebAuthn/FIDO2) on AWS Cognito and an adaptive risk engine that triggers step-up MFA only when needed.
+A demo that implements passwordless login with **Passkeys (WebAuthn/FIDO2) using Amazon Cognito** and an **adaptive risk-scoring engine** that enforces step-up MFA when risk is high. It ships with frontend, backend, infra (CDK), docs, and scripts.
 
----
-
-## Why this matters
-- **Better UX**: Passkeys remove passwords (phishing-resistant, device-bound credentials)
-- **Stronger security**: Adaptive MFA applies friction only for risky logins
-- **Measurable value**: Lower account-takeover (ATO) risk, fewer helpdesk resets, higher conversion
+> Built for local development first; deployable later with AWS CDK.
 
 ---
 
-## Architecture (at a glance)
-![Architecture](./docs/diagrams/high-level.png)
+## Tech Stack
+- **Frontend:** Next.js 14 (React 18, TypeScript)
+- **Backend:** FastAPI (Python 3.11)
+- **Infra:** AWS CDK (TypeScript)
+- **AWS:** Cognito (Passkeys/MFA), DynamoDB, (optional) API Gateway/Lambda, EventBridge, S3/Athena/QuickSight
+- **Tooling:** Node.js 20+, Python 3.11+, AWS CLI, AWS CDK
 
-**Core components**
-- **Identity**: Amazon Cognito User Pools (Passkeys/WebAuthn). Alternative: AWS Identity Center (workforce)
-- **Frontend**: Next.js demo app using Hosted UI or custom WebAuthn
-- **Risk Engine API**: FastAPI on AWS Lambda + API Gateway
-- **Data**: DynamoDB (risk_events, sessions)
-- **Analytics (optional)**: EventBridge → S3/Athena/QuickSight dashboards
-- **AI**: Rule-based baseline + optional anomaly detection (SageMaker RCF) and/or Bedrock (LLM signals)
+## Quick Start (Local)
 
----
+1. **Prerequisites**
+   - Node.js 20+
+   - Python 3.11+
+   - AWS CLI v2 and credentials configured
+   - AWS CDK v2 (`npm i -g aws-cdk`)
 
-## Demo flows
-1. **Low-risk**: User clicks *Login with Passkey* → WebAuthn assertion → Cognito → ID token issued → Risk API returns *Low* → user lands on Profile.
-2. **High-risk**: Same login, but unusual device/IP/velocity → Risk API returns *High* → app requires step-up MFA via Cognito challenge.
+2. **Deploy minimal infra (Cognito + DynamoDB)**
+   ```bash
+   cd infra
+   npm i
+   npx cdk bootstrap
+   npx cdk deploy IdentityStack DataStack
+   ```
+   Capture outputs (UserPoolId, AppClientId, Domain, Region, DDB table).
 
----
+3. **Run backend (FastAPI risk engine)**
+   ```bash
+   cd backend
+   python -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+   uvicorn app:app --reload --port 8081
+   ```
 
-## Prerequisites
-- **AWS Account** with Administrator permissions (required to deploy Cognito, Lambda, DynamoDB, etc.)
-- Node.js 20+
-- Python 3.11+
-- AWS CLI installed & configured
-- AWS CDK bootstrapped in your account
-- (Optional) MaxMind GeoLite2 City DB for geo features
+4. **Run frontend (Next.js)**
+   ```bash
+   cd frontend
+   npm i
+   npm run dev
+   ```
+   Open http://localhost:3000
 
----
+## Flow
 
-## Setup & Deployment
+- `/login` → Cognito Hosted UI (Auth Code + PKCE, Passkeys enabled)
+- `/callback` → exchange code; call **/risk/evaluate** with ID token + context
+- If risk policy requires MFA → redirect to Cognito MFA
+- `/profile` → show ID token claims and risk decision
 
-### 1. Infrastructure
-```bash
-cd infra && npm i && npx cdk bootstrap && npx cdk deploy --all
+## Environment Variables
+
+- **frontend/.env.local**
+  ```ini
+  NEXT_PUBLIC_COGNITO_DOMAIN=your-domain.auth.ap-southeast-2.amazoncognito.com
+  NEXT_PUBLIC_COGNITO_CLIENT_ID=your_app_client_id
+  NEXT_PUBLIC_COGNITO_REDIRECT_URI=http://localhost:3000/callback
+  NEXT_PUBLIC_COGNITO_LOGOUT_URI=http://localhost:3000/
+  NEXT_PUBLIC_COGNITO_REGION=ap-southeast-2
+  RISK_API_BASE=http://localhost:8081
+  ```
+
+- **backend/.env**
+  ```ini
+  COGNITO_USER_POOL_ID=ap-southeast-2_ABC123
+  COGNITO_REGION=ap-southeast-2
+  RISK_DDB_TABLE=risk_events
+  ALLOW_BEDROCK=false
+  ALLOW_SAGEMAKER=false
+  ```
+
+## Repo Structure
+
 ```
-
-### 2. Backend
-```bash
-cd ../backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app:app --reload --port 8081
+passwordless-sso-ai-risk/
+├─ README.md
+├─ LICENSE (MIT)
+├─ .gitignore
+├─ frontend/        # Next.js app
+├─ backend/         # FastAPI risk engine
+├─ infra/           # AWS CDK (TypeScript)
+├─ docs/            # diagrams + ADRs + blog draft
+└─ scripts/         # bootstrap + test
 ```
-
-### 3. Frontend
-```bash
-cd ../frontend
-npm i
-npm run dev
-```
-
----
-
-## Configure Cognito Passkeys
-- Create a User Pool with **passwordless sign-in (Passkeys/WebAuthn)** enabled (or use custom challenge Lambdas).
-- Create App Client (no secret), configure Hosted UI domain and allowed callback URLs.
-- Enable MFA (TOTP or SMS) as **OPTIONAL** so app can trigger step-up when risk is high.
-
----
-
-## Environment variables
-
-### Frontend `.env.local`
-```
-NEXT_PUBLIC_COGNITO_DOMAIN=your-domain.auth.region.amazoncognito.com
-NEXT_PUBLIC_COGNITO_CLIENT_ID=...
-NEXT_PUBLIC_COGNITO_REDIRECT_URI=http://localhost:3000/callback
-NEXT_PUBLIC_COGNITO_LOGOUT_URI=http://localhost:3000/
-NEXT_PUBLIC_COGNITO_REGION=ap-southeast-2
-```
-
-### Backend `.env`
-```
-COGNITO_USER_POOL_ID=...
-COGNITO_REGION=ap-southeast-2
-RISK_DDB_TABLE=risk_events
-ALLOW_BEDROCK=false
-ALLOW_SAGEMAKER=false
-```
-
----
-
-## Risk policy (simplified)
-- **Signals**: IP reputation, geo-velocity, device freshness, time-of-day, failed attempts, token age
-- **Scoring**: Weighted rules → categorical outcome (Low/Med/High)
-- **Step-up**: If `High`, return `require_mfa=true`, otherwise allow
-
----
-
-## Screens
-- **Landing**: Login with Passkey | Login with Password (fallback)
-- **Profile**: Shows ID token claims, last login risk label, contributing signals
-- **Admin (optional)**: QuickSight dashboard for risk trends
-
----
 
 ## Roadmap
-- Add behavioral features (typing cadence, click rhythms)
-- Integrate Amazon Bedrock Guardrails for policy hints
-- Multi-IdP brokering via Amazon Cognito + OIDC/SAML identity providers
+- Add IP reputation & geo-IP feed
+- Replace rules with ML (SageMaker/Bedrock inference)
+- Hook EventBridge → S3 (Athena/QuickSight) for analytics
 
 ---
 
-## License
-MIT
+© 2025
